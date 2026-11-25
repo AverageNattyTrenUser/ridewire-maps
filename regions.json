@@ -1,0 +1,24 @@
+{
+  "repository": "AverageNattyTrenUser/ridewire-maps",
+  "sources": {
+    "za": "https://download.geofabrik.de/africa/south-africa-latest.osm.pbf",
+    "na": "https://download.geofabrik.de/africa/namibia-latest.osm.pbf",
+    "bw": "https://download.geofabrik.de/africa/botswana-latest.osm.pbf",
+    "sz": "https://download.geofabrik.de/africa/swaziland-latest.osm.pbf"
+  },
+  "regions": [
+    {"id": "za-western-cape",   "name": "Western Cape",   "group": "South Africa", "country": "ZA", "source": "za", "bbox": [17.75, -34.85, 24.25, -30.40]},
+    {"id": "za-eastern-cape",   "name": "Eastern Cape",   "group": "South Africa", "country": "ZA", "source": "za", "bbox": [22.65, -34.25, 30.25, -30.00]},
+    {"id": "za-northern-cape",  "name": "Northern Cape",  "group": "South Africa", "country": "ZA", "source": "za", "bbox": [16.40, -32.95, 25.55, -24.70]},
+    {"id": "za-free-state",     "name": "Free State",     "group": "South Africa", "country": "ZA", "source": "za", "bbox": [24.30, -30.75, 29.80, -26.60]},
+    {"id": "za-kwazulu-natal",  "name": "KwaZulu-Natal",  "group": "South Africa", "country": "ZA", "source": "za", "bbox": [28.75, -31.10, 32.95, -26.75]},
+    {"id": "za-gauteng",        "name": "Gauteng",        "group": "South Africa", "country": "ZA", "source": "za", "bbox": [27.10, -26.95, 29.10, -25.05]},
+    {"id": "za-north-west",     "name": "North West",     "group": "South Africa", "country": "ZA", "source": "za", "bbox": [22.60, -28.00, 28.35, -24.60]},
+    {"id": "za-mpumalanga",     "name": "Mpumalanga",     "group": "South Africa", "country": "ZA", "source": "za", "bbox": [28.10, -27.85, 32.05, -24.45]},
+    {"id": "za-limpopo",        "name": "Limpopo",        "group": "South Africa", "country": "ZA", "source": "za", "bbox": [26.35, -25.35, 31.95, -22.10]},
+    {"id": "ls",                "name": "Lesotho",        "group": "Neighbours",   "country": "LS", "source": "za", "bbox": [27.00, -30.70, 29.50, -28.55]},
+    {"id": "sz",                "name": "Eswatini",       "group": "Neighbours",   "country": "SZ", "source": "sz", "bbox": [30.75, -27.35, 32.15, -25.70]},
+    {"id": "na",                "name": "Namibia",        "group": "Neighbours",   "country": "NA", "source": "na", "bbox": [11.70, -29.00, 25.30, -16.95]},
+    {"id": "bw",                "name": "Botswana",       "group": "Neighbours",   "country": "BW", "source": "bw", "bbox": [19.95, -26.95, 29.40, -17.75]}
+  ]
+}

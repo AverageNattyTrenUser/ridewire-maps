@@ -1,0 +1,144 @@
+name: Build map regions
+
+# Builds Ridewire's offline regions from OpenStreetMap and publishes them as a release:
+#   <id>.pmtiles     map tiles (OpenMapTiles schema, by Planetiler)
+#   <id>.places.db   places to search and fixed speed cameras (scripts/places.py)
+#   *.rd5            BRouter routing tiles, mirrored from brouter.de
+#   manifest.json    the list the app reads (releases/latest/download/manifest.json)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 2 3 * *" # once a month, on the 3rd
+
+permissions:
+  contents: write
+
+concurrency:
+  group: maps
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      sources: ${{ steps.plan.outputs.sources }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        run: |
+          echo "sources=$(python3 -c 'import json; print(json.dumps(sorted(json.load(open("regions.json"))["sources"])))')" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        source: ${{ fromJson(needs.plan.outputs.sources) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q osmium-tool
+          curl -sSfL -o planetiler.jar https://github.com/onthegomap/planetiler/releases/latest/download/planetiler.jar
+          java -jar planetiler.jar --help > /dev/null || true
+
+      # Water polygons, Natural Earth and lake centrelines: big, and the same for every region.
+      - name: Planetiler sources cache
+        uses: actions/cache@v4
+        with:
+          path: data/sources
+          key: planetiler-sources-${{ github.run_id }}
+          restore-keys: planetiler-sources-
+
+      - name: Get the OpenStreetMap extract
+        run: |
+          url=$(python3 -c "import json; print(json.load(open('regions.json'))['sources']['${{ matrix.source }}'])")
+          echo "Downloading $url"
+          curl -sSfL --retry 3 -o src.osm.pbf "$url"
+          ls -la src.osm.pbf
+
+      - name: Build the regions
+        run: |
+          mkdir -p dist
+          python3 - > regions.txt <<'PY'
+          import json
+          cfg = json.load(open("regions.json"))
+          for r in cfg["regions"]:
+              if r["source"] == "${{ matrix.source }}":
+                  print(r["id"], ",".join(str(v) for v in r["bbox"]))
+          PY
+          while read -r id bbox; do
+            echo "::group::$id"
+            osmium extract --overwrite -b "$bbox" src.osm.pbf -o "$id.osm.pbf"
+            java -Xmx10g -jar planetiler.jar \
+              --osm-path="$id.osm.pbf" \
+              --output="dist/$id.pmtiles" \
+              --download --force \
+              --exclude-layers=poi,housenumber,aerodrome_label,aeroway,mountain_peak
+            osmium tags-filter --overwrite "$id.osm.pbf" \
+              n/place=city,town,village,suburb,hamlet,locality,neighbourhood \
+              n/amenity=fuel,restaurant,cafe,fast_food,pub \
+              n/tourism=viewpoint,attraction,museum,camp_site,picnic_site \
+              n/natural=peak,beach n/mountain_pass=yes n/shop=motorcycle \
+              n/highway=speed_camera \
+              -o "$id.places.osm.pbf"
+            osmium export --overwrite "$id.places.osm.pbf" -f geojsonseq --geometry-types=point -o "$id.places.geojsonseq"
+            python3 scripts/places.py "$id.places.geojsonseq" "dist/$id.places.db"
+            rm -f "$id.osm.pbf" "$id.places.osm.pbf" "$id.places.geojsonseq"
+            ls -la dist/
+            echo "::endgroup::"
+          done < regions.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: maps-${{ matrix.source }}
+          path: dist/
+          retention-days: 5
+          compression-level: 0
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: maps-*
+          merge-multiple: true
+
+      - name: Routing tiles
+        run: python3 scripts/segments.py fetch regions.json dist
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          built="$(date -u +%Y-%m-%d)"
+          tag="maps-$(date -u +%Y%m%d)-${{ github.run_number }}"
+          python3 scripts/manifest.py regions.json dist "$tag" "$built" > dist/manifest.json
+          ls -la dist/
+          gh release create "$tag" dist/* --title "Maps $built" --latest --notes "Offline regions for Ridewire, built $built from OpenStreetMap.
+
+          Map data © OpenStreetMap contributors, available under the Open Database Licence (ODbL): https://www.openstreetmap.org/copyright. Map tiles in the OpenMapTiles schema (© OpenMapTiles). Routing tiles from BRouter (brouter.de)."
+
+      - name: Keep the newest three map releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release list --limit 100 --json tagName,createdAt -q '.[] | select(.tagName | startswith("maps-")) | .tagName' | tail -n +4 | while read -r old; do
+            echo "Deleting $old"
+            gh release delete "$old" --yes --cleanup-tag
+          done

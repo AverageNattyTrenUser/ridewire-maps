@@ -1,0 +1,6 @@
+__pycache__/
+*.osm.pbf
+*.geojsonseq
+dist/
+data/
+planetiler.jar
