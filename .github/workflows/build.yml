@@ -85,7 +85,9 @@ jobs:
               --osm-path="$id.osm.pbf" \
               --output="dist/$id.pmtiles" \
               --download --force \
-              --exclude-layers=poi,housenumber,aerodrome_label,aeroway,mountain_peak
+              --exclude-layers=poi,housenumber,aerodrome_label,aeroway,mountain_peak \
+              --languages=en
+            rm -f dist/*.layerstats.tsv.gz
             osmium tags-filter --overwrite "$id.osm.pbf" \
               n/place=city,town,village,suburb,hamlet,locality,neighbourhood \
               n/amenity=fuel,restaurant,cafe,fast_food,pub \
