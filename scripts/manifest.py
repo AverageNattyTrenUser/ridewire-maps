@@ -2,14 +2,25 @@
 """Writes manifest.json, the region list the app reads.
 
 Usage: manifest.py regions.json dist_dir tag built_date > manifest.json
-dist_dir holds <id>.pmtiles, <id>.places.db and the *.rd5 routing tiles, as published.
+dist_dir holds <id>.pmtiles, <id>.places.db and the *.rd5 routing tiles, as published. Each
+region file is listed with its size and SHA-256.
 """
+import hashlib
 import json
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from segments import tiles_for  # noqa: E402
+
+
+def sha256(path):
+    """The file's fingerprint: an update on the phone skips files it already has."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 def main(regions_file, dist, tag, built):
@@ -26,7 +37,7 @@ def main(regions_file, dist, tag, built):
             path = os.path.join(dist, asset)
             if not os.path.exists(path):
                 break
-            files.append({"name": name, "url": base + asset, "bytes": os.path.getsize(path)})
+            files.append({"name": name, "url": base + asset, "bytes": os.path.getsize(path), "sha256": sha256(path)})
         if len(files) != 2:
             print(f"skipping {r['id']}: files missing", file=sys.stderr)
             continue

@@ -12,7 +12,7 @@ release. The app reads the list from
 | `<id>.pmtiles` | Vector map tiles (OpenMapTiles schema), zoom 0 to 14 | [Planetiler](https://github.com/onthegomap/planetiler) |
 | `<id>.places.db` | Places to search and show on the map (SQLite, FTS4), and fixed speed cameras | `scripts/places.py` |
 | `*.rd5` | Routing tiles, 5 x 5 degrees, shared between regions | Mirrored from [brouter.de](https://brouter.de/brouter/segments4/) |
-| `manifest.json` | The list the app reads: regions, file addresses and sizes | `scripts/manifest.py` |
+| `manifest.json` | The list the app reads: regions, file addresses, sizes and SHA-256s (an update on the phone skips files it already has) | `scripts/manifest.py` |
 
 ### The place list
 
