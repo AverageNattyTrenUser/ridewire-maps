@@ -170,6 +170,10 @@ class PlacesTest(unittest.TestCase):
             "AND lon BETWEEN 19 AND 21 ORDER BY rank DESC LIMIT 800"))
         self.assertIn("place_map", plan)
 
+    def test_an_estate_listed_under_its_developer_reads_as_a_housing_development(self):
+        grp, kind, kword, show, rank = places.classify_overture(["professional_services", "home_developer"], "home_developer")
+        self.assertEqual(("other", "home_developer", "Housing development"), (grp, kind, kword))
+
     def test_words(self):
         self.assertEqual("cafe roux s", places.norm("Café Roux's"))
         self.assertEqual("Bay Lodge", places.room_free("Bay Lodge - Deluxe Room (2 Adults)"))

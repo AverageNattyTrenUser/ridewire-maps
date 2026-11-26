@@ -751,7 +751,9 @@ OVERTURE_WORDS = {"gas_station": "Fuel station", "fueling_station": "Fuel statio
                   "christian_place_of_worship": "Church", "muslim_place_of_worship": "Mosque",
                   "roman_catholic_place_of_worship": "Church", "anglican_or_episcopal_place_of_worship": "Church",
                   "shopping": "Shop", "food_and_drink": "Food", "lodging": "Accommodation",
-                  "health_care": "Health care", "bed_and_breakfast": "B&B"}
+                  "health_care": "Health care", "bed_and_breakfast": "B&B",
+                  # Mostly the estates themselves ("... Country Estate"), listed under their developer.
+                  "home_developer": "Housing development"}
 
 
 def classify_overture(hier, cat):
