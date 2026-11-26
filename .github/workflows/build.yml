@@ -1,13 +1,28 @@
 name: Build map regions
 
-# Builds Ridewire's offline regions from OpenStreetMap and publishes them as a release:
-#   <id>.pmtiles     map tiles (OpenMapTiles schema, by Planetiler)
-#   <id>.places.db   places to search and fixed speed cameras (scripts/places.py)
+# Builds Ridewire's offline regions and publishes them as a release:
+#   <id>.pmtiles     map tiles (OpenMapTiles schema, by Planetiler) from OpenStreetMap
+#   <id>.places.db   places to search and show on the map, and fixed speed cameras (scripts/places.py),
+#                    from OpenStreetMap and Overture Maps
 #   *.rd5            BRouter routing tiles, mirrored from brouter.de
 #   manifest.json    the list the app reads (releases/latest/download/manifest.json)
+# A run can rebuild some regions or only the place lists: the rest is copied from the latest release.
 
 on:
   workflow_dispatch:
+    inputs:
+      regions:
+        description: "Region ids to build, comma-separated (empty: all). The others are copied from the latest release."
+        required: false
+        default: ""
+      tiles:
+        description: "Build the map tiles (off: copy them from the latest release, which is much quicker)"
+        type: boolean
+        default: true
+      publish:
+        description: "Publish a release (off: keep the files as a workflow artifact for five days)"
+        type: boolean
+        default: true
   schedule:
     - cron: "17 2 3 * *" # once a month, on the 3rd
 
@@ -18,6 +33,10 @@ concurrency:
   group: maps
   cancel-in-progress: false
 
+env:
+  ONLY: ${{ inputs.regions }}
+  TILES: ${{ inputs.tiles }}
+
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -25,9 +44,21 @@ jobs:
       sources: ${{ steps.plan.outputs.sources }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Test the place list builder
+        run: python3 -m unittest discover -s tests
+
       - id: plan
         run: |
-          echo "sources=$(python3 -c 'import json; print(json.dumps(sorted(json.load(open("regions.json"))["sources"])))')" >> "$GITHUB_OUTPUT"
+          python3 - >> "$GITHUB_OUTPUT" <<'PY'
+          import json, os
+          cfg = json.load(open("regions.json"))
+          only = {r.strip() for r in os.environ.get("ONLY", "").split(",") if r.strip()}
+          unknown = only - {r["id"] for r in cfg["regions"]}
+          if unknown:
+              raise SystemExit(f"Unknown regions: {', '.join(sorted(unknown))}")
+          print("sources=" + json.dumps(sorted({r["source"] for r in cfg["regions"] if not only or r["id"] in only})))
+          PY
 
   build:
     needs: plan
@@ -42,19 +73,27 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-java@v4
+        if: env.TILES != 'false'
         with:
           distribution: temurin
           java-version: "21"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Tools
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q osmium-tool
-          curl -sSfL -o planetiler.jar https://github.com/onthegomap/planetiler/releases/latest/download/planetiler.jar
-          java -jar planetiler.jar --help > /dev/null || true
+          pip install -q duckdb==2.0.1
+          if [ "$TILES" != "false" ]; then
+            curl -sSfL -o planetiler.jar https://github.com/onthegomap/planetiler/releases/latest/download/planetiler.jar
+          fi
 
       # Water polygons, Natural Earth and lake centrelines: big, and the same for every region.
       - name: Planetiler sources cache
+        if: env.TILES != 'false'
         uses: actions/cache@v4
         with:
           path: data/sources
@@ -69,35 +108,42 @@ jobs:
           ls -la src.osm.pbf
 
       - name: Build the regions
+        env:
+          SOURCE: ${{ matrix.source }}
         run: |
           mkdir -p dist
           python3 - > regions.txt <<'PY'
-          import json
+          import json, os
           cfg = json.load(open("regions.json"))
+          only = {r.strip() for r in os.environ.get("ONLY", "").split(",") if r.strip()}
           for r in cfg["regions"]:
-              if r["source"] == "${{ matrix.source }}":
+              if r["source"] == os.environ["SOURCE"] and (not only or r["id"] in only):
                   print(r["id"], ",".join(str(v) for v in r["bbox"]))
           PY
           while read -r id bbox; do
             echo "::group::$id"
             osmium extract --overwrite -b "$bbox" src.osm.pbf -o "$id.osm.pbf"
-            java -Xmx10g -jar planetiler.jar \
-              --osm-path="$id.osm.pbf" \
-              --output="dist/$id.pmtiles" \
-              --download --force \
-              --exclude-layers=poi,housenumber,aerodrome_label,aeroway,mountain_peak \
-              --languages=en
-            rm -f dist/*.layerstats.tsv.gz
+            if [ "$TILES" != "false" ]; then
+              java -Xmx10g -jar planetiler.jar \
+                --osm-path="$id.osm.pbf" \
+                --output="dist/$id.pmtiles" \
+                --download --force \
+                --exclude-layers=poi,housenumber,aerodrome_label,aeroway,mountain_peak \
+                --languages=en
+              rm -f dist/*.layerstats.tsv.gz
+            fi
+            # Everything named, addresses, fuel stations and speed cameras: places.py picks what to keep.
             osmium tags-filter --overwrite "$id.osm.pbf" \
-              n/place=city,town,village,suburb,hamlet,locality,neighbourhood \
-              n/amenity=fuel,restaurant,cafe,fast_food,pub \
-              n/tourism=viewpoint,attraction,museum,camp_site,picnic_site \
-              n/natural=peak,beach n/mountain_pass=yes n/shop=motorcycle \
-              n/highway=speed_camera \
+              nwr/name nwr/brand nwr/addr:housenumber nwr/addr:housename nw/amenity=fuel n/highway=speed_camera \
               -o "$id.places.osm.pbf"
-            osmium export --overwrite "$id.places.osm.pbf" -f geojsonseq --geometry-types=point -o "$id.places.geojsonseq"
-            python3 scripts/places.py "$id.places.geojsonseq" "dist/$id.places.db"
-            rm -f "$id.osm.pbf" "$id.places.osm.pbf" "$id.places.geojsonseq"
+            osmium export --overwrite "$id.places.osm.pbf" -c scripts/export.json -f geojsonseq -o "$id.places.geojsonseq"
+            for try in 1 2 3; do
+              if python3 scripts/overture.py "$bbox" "$id.overture.jsonl"; then break; fi
+              if [ "$try" = 3 ]; then echo "::error::Overture places unavailable for $id"; exit 1; fi
+              sleep 60
+            done
+            python3 scripts/places.py "$id.places.geojsonseq" "dist/$id.places.db" "$id.overture.jsonl"
+            rm -f "$id.osm.pbf" "$id.places.osm.pbf" "$id.places.geojsonseq" "$id.overture.jsonl"
             ls -la dist/
             echo "::endgroup::"
           done < regions.txt
@@ -111,6 +157,9 @@ jobs:
 
   publish:
     needs: build
+    # A region that failed to build keeps its files from the latest release. (A scheduled run has
+    # no inputs: it always publishes.)
+    if: ${{ !cancelled() && needs.build.result != 'skipped' && (github.event_name != 'workflow_dispatch' || inputs.publish) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,6 +169,25 @@ jobs:
           path: dist
           pattern: maps-*
           merge-multiple: true
+
+      - name: Copy what wasn't rebuilt from the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          if ! ls dist/*.places.db > /dev/null 2>&1; then echo "::error::Nothing was built"; exit 1; fi
+          python3 - > missing.txt <<'PY'
+          import json, os
+          for r in json.load(open("regions.json"))["regions"]:
+              for ext in ("pmtiles", "places.db"):
+                  if not os.path.exists(f"dist/{r['id']}.{ext}"):
+                      print(f"{r['id']}.{ext}")
+          PY
+          if [ -s missing.txt ]; then
+            latest=$(gh release view --json tagName -q .tagName)
+            echo "Copying from $latest:"; cat missing.txt
+            while read -r f; do gh release download "$latest" -p "$f" -D dist; done < missing.txt
+          fi
 
       - name: Routing tiles
         run: python3 scripts/segments.py fetch regions.json dist
@@ -132,9 +200,11 @@ jobs:
           tag="maps-$(date -u +%Y%m%d)-${{ github.run_number }}"
           python3 scripts/manifest.py regions.json dist "$tag" "$built" > dist/manifest.json
           ls -la dist/
-          gh release create "$tag" dist/* --title "Maps $built" --latest --notes "Offline regions for Ridewire, built $built from OpenStreetMap.
+          gh release create "$tag" dist/* --title "Maps $built" --latest --notes "Offline regions for Ridewire, built $built.
 
-          Map data © OpenStreetMap contributors, available under the Open Database Licence (ODbL): https://www.openstreetmap.org/copyright. Map tiles in the OpenMapTiles schema (© OpenMapTiles). Routing tiles from BRouter (brouter.de)."
+          Map data © OpenStreetMap contributors, available under the Open Database Licence (ODbL): https://www.openstreetmap.org/copyright. Map tiles in the OpenMapTiles schema (© OpenMapTiles). Routing tiles from BRouter (brouter.de).
+
+          Places also from Overture Maps Foundation (https://overturemaps.org), under the Community Data License Agreement Permissive 2.0 (https://cdla.dev/permissive-2-0/), including data from Foursquare under the Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0; Copyright 2024 Foursquare Labs, Inc.) and from AllThePlaces (CC0 1.0)."
 
       - name: Keep the newest three map releases
         env:

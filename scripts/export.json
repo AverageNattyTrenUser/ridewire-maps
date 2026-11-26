@@ -1,0 +1,25 @@
+{
+    "attributes": {
+        "type": false,
+        "id": false
+    },
+    "linear_tags": ["highway"],
+    "area_tags": [
+        "building", "landuse", "shop", "amenity", "tourism", "leisure", "historic", "office", "craft",
+        "healthcare", "natural", "place", "aeroway", "man_made", "club", "railway", "public_transport",
+        "area=yes"
+    ],
+    "exclude_tags": [
+        "source", "source:*", "note", "note:*", "fixme", "FIXME", "created_by", "check_date", "check_date:*",
+        "survey:date", "image", "image:*", "wikimedia_commons", "description", "description:*",
+        "opening_hours", "opening_hours:*", "phone", "contact:*", "website", "email", "fax", "payment:*",
+        "fuel:*", "wheelchair", "wheelchair:*", "toilets:*", "diet:*", "survey", "lit", "surface",
+        "smoothness", "lanes", "lanes:*", "maxspeed:*", "oneway", "sidewalk", "sidewalk:*", "layer",
+        "building:levels", "building:material", "roof:*", "height", "start_date", "wikipedia", "wikidata",
+        "brand:wikipedia", "operator:wikidata", "operator:wikipedia", "network:wikidata", "level",
+        "internet_access", "internet_access:*", "outdoor_seating", "indoor_seating", "takeaway", "delivery",
+        "drive_through", "air_conditioning", "capacity", "capacity:*", "parking:*", "cycleway", "cycleway:*",
+        "turn:*", "destination", "destination:*", "maxweight", "maxheight", "bicycle", "foot", "motor_vehicle",
+        "access", "horse", "hgv"
+    ]
+}
