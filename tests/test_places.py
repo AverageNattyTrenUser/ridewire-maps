@@ -34,8 +34,12 @@ OSM = [
     square(20.005, -34.005, 0.0002, building="apartments", name="Sunrise Court", **{"addr:housenumber": "7",
                                                                                      "addr:street": "Ocean Road"}),
     point(20.006, -34.006, **{"addr:housenumber": "12", "addr:street": "Ocean Road"}),
-    line([[20.000, -34.004], [20.004, -34.004], [20.008, -34.004]], highway="residential", name="Ocean Road"),
-    line([[20.008, -34.004], [20.012, -34.004]], highway="residential", name="Ocean Road"),
+    # Ocean Road in three pieces: the two long ends only meet through the short middle one.
+    line([[20.000, -34.004], [20.005, -34.004]], highway="residential", name="Ocean Road"),
+    line([[20.0085, -34.004], [20.0135, -34.004]], highway="residential", name="Ocean Road"),
+    line([[20.005, -34.004], [20.0085, -34.004]], highway="residential", name="Ocean Road"),
+    square(20.02, -34.00, 0.01, place="town", name="Port Example"),  # the town's area as well as its centre
+    square(20.0151, -34.0151, 0.0001, building="roof", name="Petrol Co"),  # the canopy over the pumps
     point(20.015, -34.015, amenity="fuel", brand="Petrol Co"),
     point(20.016, -34.016, highway="speed_camera", maxspeed="60"),
     point(20.017, -34.017, amenity="parking", name="Harbour View"),
@@ -54,6 +58,12 @@ OVERTURE = [
     {"name": "Sea Breeze 4 - Two-Bedroom Apartment", "cat": "private_lodging",
      "hier": "lodging/private_lodging/holiday_rental_home", "conf": 0.9, "lon": 20.021, "lat": -34.021, "street": None,
      "locality": "Port Example", "brand": None},
+    {"name": "Seaside Hardware, Western Cape, Port Example", "cat": "hardware_store",
+     "hier": "shopping/specialty_store/hardware_store", "conf": 0.9, "lon": 20.003, "lat": -34.003, "street": None,
+     "locality": "Port Example", "brand": None},
+    # Overture's idea of what the fuel station is can be wrong: the name and place say it's the same.
+    {"name": "Petrol Co", "cat": "grocery_store", "hier": "shopping/food_and_beverage_store/grocery_store",
+     "conf": 0.8, "lon": 20.0165, "lat": -34.0155, "street": None, "locality": "Port Example", "brand": None},
     {"name": "Maybe Closed Plumbing", "cat": "home_service", "hier": "services_and_business/home_service", "conf": 0.3,
      "lon": 20.022, "lat": -34.022, "street": None, "locality": "Port Example", "brand": None},
     {"name": "Quiet Accountants", "cat": "accountant", "hier": "services_and_business/financial_service/accountant",
@@ -109,7 +119,7 @@ class PlacesTest(unittest.TestCase):
     def test_addresses_and_streets(self):
         self.assertEqual([("12 Ocean Road", "address", "Address · Seaside", 0)], self.find("12 ocean"))
         streets = [g for g in self.find("ocean road") if g[1] == "street"]
-        self.assertEqual([("Ocean Road", "street", "Street · Seaside", 0)], streets)
+        self.assertEqual([("Ocean Road", "street", "Street · Seaside", 0)], streets)  # one, however it's cut up
 
     def test_what_a_place_is_finds_it(self):
         self.assertIn("Pizza Planet", [g[0] for g in self.find("pizza")])
@@ -117,9 +127,19 @@ class PlacesTest(unittest.TestCase):
         self.assertEqual(["Petrol Co"], [g[0] for g in fuel])
         self.assertEqual("fuel", fuel[0][1])
 
-    def test_towns(self):
-        got = self.find("port example")
-        self.assertEqual(("Port Example", "town", "Town", 0), got[0])
+    def test_towns_once_at_their_centre(self):
+        got = [g for g in self.find("port example") if g[0] == "Port Example"]
+        self.assertEqual([("Port Example", "town", "Town", 0)], got)
+        lat, lon = self.db.execute("SELECT lat, lon FROM place WHERE name = 'Port Example'").fetchone()
+        self.assertEqual((-34.0, 20.0), (lat, lon))
+        self.assertEqual(("Seaside", "town", "Suburb · Port Example", 0), self.find("seaside")[0])
+
+    def test_the_same_place_from_both_lists_once(self):
+        got = self.find("petrol co")
+        self.assertEqual([("Petrol Co", "fuel", "Fuel station · Seaside", 1)], got)
+
+    def test_overture_names_without_where_they_are(self):
+        self.assertEqual("Seaside Hardware", self.find("seaside hardware")[0][0])
 
     def test_overture_extras(self):
         self.assertEqual([("Corner Cafe", "food", "Cafe · Seaside", 1)], self.find("corner cafe"))

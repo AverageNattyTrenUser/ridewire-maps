@@ -85,6 +85,9 @@ SYNONYMS = {
     "police": "police station",
 }
 
+# Groups never merged with another place of the same name: "Main Road" the street isn't a shop.
+PLAIN = {"street", "address", "town"}
+
 GENERIC_NAMES = {"parking", "car park", "toilets", "toilet", "shop", "store", "building", "house", "garage",
                  "entrance", "gate", "bus stop", "unnamed", "no name", "yes"}
 
@@ -238,7 +241,7 @@ def classify(tags):
     if lu in LANDUSE_WORDS:
         return ("shop" if lu == "retail" else "other"), lu, LANDUSE_WORDS[lu], 0, 2
     b = t("building")
-    if b and b != "no":
+    if b and b not in ("no", "roof", "carport", "construction"):
         return "building", b, BUILDING_WORDS.get(b) or (word(b) + " building"), 2, 1
     return None
 
@@ -515,18 +518,21 @@ class Builder:
         self.entries = []
         self.index = Index()
         self.streets = defaultdict(list)
+        self.towns = {}
         self.cameras = []
         self.merged = 0
 
     def where(self, x, y, own):
         return self.w.complex(x, y, own), self.w.suburb(x, y), self.w.town(x, y)
 
-    def add(self, e, km=0.15, grp_must_match=True):
-        """Adds [e] unless it's already listed nearby, in which case the two become one."""
-        for o in self.index.near(e.x, e.y, km):
-            if grp_must_match and o.grp != e.grp and not {o.grp, e.grp} & {"other", "building"}:
-                continue
-            if same_place(o.name, o.ctx, e.name, e.ctx):
+    def add(self, e):
+        """Adds [e] unless it's already listed nearby, in which case the two become one: the same
+        name within 250 m (a supermarket and Overture's "supermarket" ATM in it), or a name plus
+        words from where it is within 150 m, if they're the same kind of place."""
+        if e.grp == "town":
+            return self.add_town(e)
+        for o in self.index.near(e.x, e.y, 0.25):
+            if self.same(o, e):
                 if norm(e.name) != norm(o.name):
                     o.alt = join_words([o.alt, e.name])
                 o.ctx = join_words([o.ctx, e.ctx])
@@ -539,6 +545,32 @@ class Builder:
                 return o
         self.entries.append(e)
         self.index.add(e)
+        return e
+
+    @staticmethod
+    def same(o, e):
+        if o.grp in PLAIN or e.grp in PLAIN:
+            return False
+        if toks(o.name) == toks(e.name):
+            return True
+        if dist_km(e.x, e.y, o.x, o.y) > 0.15:
+            return False
+        if o.grp != e.grp and not {o.grp, e.grp} & {"other", "building"}:
+            return False
+        return same_place(o.name, o.ctx, e.name, e.ctx)
+
+    def add_town(self, e):
+        """A town or suburb is often both a point (its centre) and an area: listed once, at the centre."""
+        reach = 8.0 if e.kind in ("city", "town") else 3.0
+        same = self.towns.setdefault(norm(e.name), [])
+        for o in same:
+            if dist_km(e.x, e.y, o.x, o.y) <= reach:
+                o.rank = max(o.rank, e.rank)
+                o.alt = join_words([o.alt, e.alt])
+                self.merged += 1
+                return o
+        same.append(e)
+        self.entries.append(e)
         return e
 
     # ------------------------------------------------------------- OpenStreetMap
@@ -630,25 +662,31 @@ class Builder:
              tags.get("name:af"), tags.get("alt_name"), tags.get("old_name")))
 
     def finish_streets(self):
-        """One entry per street in each suburb (a street is many pieces of road), at its longest piece."""
+        """One entry per street in each suburb (a street is many pieces of road, and a dual
+        carriageway two), at its longest piece."""
         pad = 0.003
         for pieces in self.streets.values():
-            groups = []  # [bbox, pieces]
-            for p in sorted(pieces, key=lambda q: -q[4]):
-                x0, y0, x1, y1 = p[5]
-                hit = None
-                for g in groups:
-                    gx0, gy0, gx1, gy1 = g[0]
-                    if x0 - pad <= gx1 and gx0 <= x1 + pad and y0 - pad <= gy1 and gy0 <= y1 + pad:
-                        hit = g
-                        break
-                if hit:
-                    gx0, gy0, gx1, gy1 = hit[0]
-                    hit[0] = (min(gx0, x0), min(gy0, y0), max(gx1, x1), max(gy1, y1))
-                    hit[1].append(p)
-                else:
-                    groups.append([(x0, y0, x1, y1), [p]])
-            for _, ps in groups:
+            pieces.sort(key=lambda q: -q[4])
+            parent = list(range(len(pieces)))
+
+            def root(i):
+                while parent[i] != i:
+                    parent[i] = parent[parent[i]]
+                    i = parent[i]
+                return i
+
+            for i, a in enumerate(pieces):
+                ax0, ay0, ax1, ay1 = a[5]
+                for j in range(i + 1, len(pieces)):
+                    bx0, by0, bx1, by1 = pieces[j][5]
+                    if ax0 - pad <= bx1 and bx0 <= ax1 + pad and ay0 - pad <= by1 and by0 <= ay1 + pad:
+                        ri, rj = root(i), root(j)
+                        if ri != rj:
+                            parent[max(ri, rj)] = min(ri, rj)
+            groups = defaultdict(list)
+            for i, p in enumerate(pieces):
+                groups[root(i)].append(p)  # in length order: the first is the longest
+            for ps in groups.values():
                 name, hw, x, y, _, _, suburb, town, af, alt_name, old = ps[0]  # the longest piece
                 kinds = {q[1] for q in ps}
                 hw = next((k for k in ("motorway", "trunk", "primary", "secondary") if k in kinds), hw)
@@ -671,6 +709,7 @@ class Builder:
         grp, kind, kword, show, rank = what
         if grp == "lodging":
             name = room_free(name)
+        name = without_where(name, [r.get("locality")] + list(self.where(r["lon"], r["lat"], name)))
         if len(norm(name)) < 2 or norm(name) in GENERIC_NAMES:
             return
         if conf < SHOW_CONFIDENCE:
@@ -685,7 +724,7 @@ class Builder:
         sub = sub_line(kword, cplx, suburb or town or r.get("locality"))
         ctx = join_words([cplx, suburb, town, street, r.get("locality"), kword, synonyms(grp, kind, kword)])
         alt = join_words([r.get("brand")]) if r.get("brand") and norm(r["brand"]) not in norm(name) else ""
-        self.add(Entry(name, kind, grp, sub, x, y, rank, show, alt, ctx, False), km=0.15)
+        self.add(Entry(name, kind, grp, sub, x, y, rank, show, alt, ctx, False))
 
 
 MIN_CONFIDENCE = 0.5   # Overture's: how sure it is the place exists
@@ -755,6 +794,22 @@ def room_free(name):
         if ROOM_WORDS.search(tail) and len(norm(head)) >= 3:
             return head.strip()
     return name
+
+
+REGIONS = {"south africa", "western cape", "eastern cape", "northern cape", "free state", "kwazulu natal", "gauteng",
+           "north west", "mpumalanga", "limpopo", "namibia", "botswana", "lesotho", "eswatini", "swaziland", "za",
+           "rsa"}
+
+
+def without_where(name, places):
+    """"Harbour Mall, Western Cape, Port Example" is the Harbour Mall: the parts after a comma
+    that only say where it is go (the line under the name says that)."""
+    parts = [p.strip() for p in name.split(",")]
+    if len(parts) < 2:
+        return name
+    known = set(REGIONS) | {norm(p) for p in places if p}
+    keep = [parts[0]] + [p for p in parts[1:] if norm(p) not in known]
+    return ", ".join(p for p in keep if p)
 
 
 def synonyms(grp, kind, kword):
