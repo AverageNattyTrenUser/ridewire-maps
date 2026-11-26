@@ -2,16 +2,18 @@
 """Fetches Overture Maps places (business listings from Meta, Microsoft, Foursquare, AllThePlaces and
 others) inside a bounding box, from Overture's latest release, as JSON lines for places.py.
 
-Kept: places Overture is at least 50% sure exist, not marked closed, whose every source is under
-a licence the region files can carry (CDLA-Permissive-2.0, Apache-2.0, CC0-1.0).
+Kept: places in the region's country (a region's box can reach over a border), that Overture is
+at least 50% sure exist, not marked closed, and whose every source is under a licence the region
+files can carry (CDLA-Permissive-2.0, Apache-2.0, CC0-1.0).
 
 Each line: name, cat (basic category), hier (the category's family, top to leaf: "a/b/c"),
 conf (0 to 1), lon, lat, street (the address as one line), locality, brand.
 
-Usage: overture.py west,south,east,north out.jsonl
+Usage: overture.py west,south,east,north out.jsonl [country code, e.g. ZA]
 Needs: pip install duckdb
 """
 import json
+import re
 import sys
 import urllib.request
 
@@ -27,8 +29,11 @@ def latest_release():
         return json.load(r)["latest"]
 
 
-def main(bbox, out):
+def main(bbox, out, country=None):
     w, s, e, n = (float(v) for v in bbox.split(","))
+    if country and not re.fullmatch(r"[A-Za-z]{2}", country):
+        raise SystemExit(f"Not a country code: {country}")
+    in_country = f"coalesce(addresses[1].country, '{country.upper()}') = '{country.upper()}'" if country else "true"
     release = latest_release()
     src = f"s3://overturemaps-us-west-2/release/{release}/theme=places/type=place/*"
     con = duckdb.connect()
@@ -52,6 +57,7 @@ def main(bbox, out):
             FROM read_parquet('{src}', hive_partitioning=1)
             WHERE bbox.xmin BETWEEN {w} AND {e} AND bbox.ymin BETWEEN {s} AND {n}
               AND names.primary IS NOT NULL
+              AND {in_country}
               AND confidence >= {MIN_CONFIDENCE}
               AND {status}
               AND len(list_filter(sources, lambda x: x.license NOT IN ({licences}))) = 0
@@ -62,4 +68,4 @@ def main(bbox, out):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    main(*sys.argv[1:4])

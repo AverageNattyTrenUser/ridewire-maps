@@ -118,9 +118,9 @@ jobs:
           only = {r.strip() for r in os.environ.get("ONLY", "").split(",") if r.strip()}
           for r in cfg["regions"]:
               if r["source"] == os.environ["SOURCE"] and (not only or r["id"] in only):
-                  print(r["id"], ",".join(str(v) for v in r["bbox"]))
+                  print(r["id"], ",".join(str(v) for v in r["bbox"]), r["country"])
           PY
-          while read -r id bbox; do
+          while read -r id bbox country; do
             echo "::group::$id"
             osmium extract --overwrite -b "$bbox" src.osm.pbf -o "$id.osm.pbf"
             if [ "$TILES" != "false" ]; then
@@ -138,7 +138,7 @@ jobs:
               -o "$id.places.osm.pbf"
             osmium export --overwrite "$id.places.osm.pbf" -c scripts/export.json -f geojsonseq -o "$id.places.geojsonseq"
             for try in 1 2 3; do
-              if python3 scripts/overture.py "$bbox" "$id.overture.jsonl"; then break; fi
+              if python3 scripts/overture.py "$bbox" "$id.overture.jsonl" "$country"; then break; fi
               if [ "$try" = 3 ]; then echo "::error::Overture places unavailable for $id"; exit 1; fi
               sleep 60
             done
