@@ -519,6 +519,7 @@ class Builder:
         self.index = Index()
         self.streets = defaultdict(list)
         self.towns = {}
+        self.fuel_brands = set()
         self.cameras = []
         self.merged = 0
 
@@ -596,6 +597,8 @@ class Builder:
         x, y = p
         what = classify(tags)
         name = t("name:en") or t("name")
+        if what and what[0] == "fuel" and t("amenity") == "fuel" and t("brand"):
+            self.fuel_brands.add(norm(t("brand")))
         if what and what[0] == "fuel" and not name:
             name = t("brand") or t("operator") or "Fuel station"
         if not name and what and t("brand"):
@@ -706,6 +709,8 @@ class Builder:
         if any(h in OVERTURE_SKIP for h in hier):
             return
         what = classify_overture(hier, r.get("cat"))
+        if norm(name) in self.fuel_brands and what[0] != "fuel":
+            what = ("fuel", "fuel", "Fuel station", 1, 9)  # "Engen" filed as a grocery is the Engen garage
         grp, kind, kword, show, rank = what
         if grp == "lodging":
             name = room_free(name)
@@ -754,7 +759,7 @@ def classify_overture(hier, cat):
     leaf = hier[-1] if hier else (cat or "")
     top = hier[0] if hier else ""
     words = set(hier) | {cat or ""}
-    kword = OVERTURE_WORDS.get(leaf) or word(leaf)
+    kword = OVERTURE_WORDS.get(leaf) or word(leaf) or "Place"
     show = 0 if (top in OVERTURE_QUIET and leaf not in OVERTURE_SHOWN) or leaf in ("preschool", "day_care_preschool") else 1
     if words & {"gas_station", "fueling_station", "ev_charging_station", "truck_gas_station"}:
         return "fuel", leaf, kword, 1, 9

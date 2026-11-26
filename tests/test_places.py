@@ -64,6 +64,11 @@ OVERTURE = [
     # Overture's idea of what the fuel station is can be wrong: the name and place say it's the same.
     {"name": "Petrol Co", "cat": "grocery_store", "hier": "shopping/food_and_beverage_store/grocery_store",
      "conf": 0.8, "lon": 20.0165, "lat": -34.0155, "street": None, "locality": "Port Example", "brand": None},
+    # Named for a fuel brand the region's fuel stations carry, but filed as something else.
+    {"name": "Petrol Co", "cat": "korean_grocery_store", "hier": "shopping/food_and_beverage_store/korean_grocery_store",
+     "conf": 0.9, "lon": 20.06, "lat": -34.06, "street": None, "locality": "Port Example", "brand": None},
+    {"name": "Nameless Category Place", "cat": None, "hier": None, "conf": 0.9, "lon": 20.0118, "lat": -34.0118,
+     "street": None, "locality": "Port Example", "brand": None},
     {"name": "Maybe Closed Plumbing", "cat": "home_service", "hier": "services_and_business/home_service", "conf": 0.3,
      "lon": 20.022, "lat": -34.022, "street": None, "locality": "Port Example", "brand": None},
     {"name": "Quiet Accountants", "cat": "accountant", "hier": "services_and_business/financial_service/accountant",
@@ -124,8 +129,7 @@ class PlacesTest(unittest.TestCase):
     def test_what_a_place_is_finds_it(self):
         self.assertIn("Pizza Planet", [g[0] for g in self.find("pizza")])
         fuel = self.find("petrol")
-        self.assertEqual(["Petrol Co"], [g[0] for g in fuel])
-        self.assertEqual("fuel", fuel[0][1])
+        self.assertEqual([("Petrol Co", "fuel")] * 2, [g[:2] for g in fuel])
 
     def test_towns_once_at_their_centre(self):
         got = [g for g in self.find("port example") if g[0] == "Port Example"]
@@ -135,8 +139,13 @@ class PlacesTest(unittest.TestCase):
         self.assertEqual(("Seaside", "town", "Suburb · Port Example", 0), self.find("seaside")[0])
 
     def test_the_same_place_from_both_lists_once(self):
-        got = self.find("petrol co")
-        self.assertEqual([("Petrol Co", "fuel", "Fuel station · Seaside", 1)], got)
+        got = sorted(self.find("petrol co"), key=lambda g: g[2], reverse=True)
+        self.assertEqual([("Petrol Co", "fuel", "Fuel station · Seaside", 1),
+                          # the one further away, filed by Overture as a grocery: a fuel station too
+                          ("Petrol Co", "fuel", "Fuel station · Port Example", 1)], got)
+
+    def test_the_second_line_starts_with_what_it_is(self):
+        self.assertEqual("Place · Harbour View · Seaside", self.find("nameless category")[0][2])  # not "Harbour View"
 
     def test_overture_names_without_where_they_are(self):
         self.assertEqual("Seaside Hardware", self.find("seaside hardware")[0][0])
@@ -149,7 +158,7 @@ class PlacesTest(unittest.TestCase):
         self.assertEqual(0, self.find("quiet accountants")[0][3])  # found, but not drawn
 
     def test_skipped(self):
-        self.assertEqual([], [g for g in self.find("harbour view") if g[1] == "other"])  # the car park
+        self.assertEqual([], [g for g in self.find("harbour view") if g[0] == "Harbour View" and g[1] == "other"])  # the car park
         self.assertEqual([], self.find("memorial bench"))
 
     def test_cameras(self):
