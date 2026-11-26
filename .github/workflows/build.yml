@@ -104,7 +104,7 @@ jobs:
         run: |
           url=$(python3 -c "import json; print(json.load(open('regions.json'))['sources']['${{ matrix.source }}'])")
           echo "Downloading $url"
-          curl -sSfL --retry 3 -o src.osm.pbf "$url"
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 30 -o src.osm.pbf "$url"
           ls -la src.osm.pbf
 
       - name: Build the regions
